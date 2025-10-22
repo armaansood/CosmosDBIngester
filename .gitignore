@@ -6,6 +6,19 @@
 # dotenv files
 .env
 
+# Security: Audit logs with potentially sensitive information
+Logs/
+*.log
+**/Logs/**
+
+# Security: User settings and credentials
+**/appsettings.Development.json
+**/appsettings.Local.json
+**/*secrets*.json
+**/connectionstrings*.json
+**/credentials*.json
+*.settings.user
+
 # User-specific files
 *.rsuser
 *.suo

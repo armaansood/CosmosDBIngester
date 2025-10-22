@@ -1,5 +1,6 @@
 using Microsoft.Azure.Cosmos;
 using CosmosDBIngester.Models;
+using CosmosDBIngester.Security;
 using System.Diagnostics;
 using Bogus;
 using CosmosDatabase = Microsoft.Azure.Cosmos.Database;
@@ -18,6 +19,7 @@ public class CosmosDbService : IDisposable
     private volatile bool _isRunning = false;
     private bool _disposed = false;
     private readonly object _statsLock = new object();
+    private readonly AuditLogger _auditLogger = new AuditLogger();
 
     // Reusable Faker instances (thread-safe)
     private static readonly Faker _faker = new Faker();
@@ -31,18 +33,45 @@ public class CosmosDbService : IDisposable
     {
         try
         {
-            // Validate input
-            if (string.IsNullOrWhiteSpace(config.Endpoint))
-                throw new ArgumentException("Endpoint cannot be empty", nameof(config.Endpoint));
+            // Security: Comprehensive input validation
+            var endpointResult = InputValidator.ValidateEndpoint(config.Endpoint);
+            if (!endpointResult.IsValid)
+            {
+                _auditLogger.LogAuthenticationAttempt(config.Endpoint, false, "Invalid endpoint format");
+                throw new ArgumentException(endpointResult.ErrorMessage, nameof(config.Endpoint));
+            }
             
-            if (string.IsNullOrWhiteSpace(config.PrimaryKey))
-                throw new ArgumentException("Primary key cannot be empty", nameof(config.PrimaryKey));
+            var primaryKey = config.GetPrimaryKey();
+            var keyResult = InputValidator.ValidatePrimaryKey(primaryKey);
+            if (!keyResult.IsValid)
+            {
+                _auditLogger.LogAuthenticationAttempt(config.Endpoint, false, "Invalid primary key format");
+                throw new ArgumentException(keyResult.ErrorMessage, nameof(config));
+            }
+            
+            var dbResult = InputValidator.ValidateDatabaseName(config.DatabaseName);
+            if (!dbResult.IsValid)
+            {
+                _auditLogger.LogSecurityEvent("InvalidDatabaseName", dbResult.ErrorMessage, "Warning");
+                throw new ArgumentException(dbResult.ErrorMessage, nameof(config.DatabaseName));
+            }
+            
+            var collResult = InputValidator.ValidateCollectionName(config.CollectionName);
+            if (!collResult.IsValid)
+            {
+                _auditLogger.LogSecurityEvent("InvalidCollectionName", collResult.ErrorMessage, "Warning");
+                throw new ArgumentException(collResult.ErrorMessage, nameof(config.CollectionName));
+            }
+            
+            var throughputResult = InputValidator.ValidateThroughput(config.ThroughputRUs);
+            if (!throughputResult.IsValid)
+            {
+                throw new ArgumentException(throughputResult.ErrorMessage, nameof(config.ThroughputRUs));
+            }
 
-            if (!Uri.TryCreate(config.Endpoint, UriKind.Absolute, out _))
-                throw new ArgumentException("Endpoint must be a valid URL", nameof(config.Endpoint));
+            OnStatusChanged?.Invoke("Initializing secure connection to Cosmos DB...");
 
-            OnStatusChanged?.Invoke("Initializing connection to Cosmos DB...");
-
+            // Security: TLS 1.2+ enforcement (handled by CosmosClient)
             var options = new CosmosClientOptions
             {
                 AllowBulkExecution = true,
@@ -51,7 +80,7 @@ public class CosmosDbService : IDisposable
                 RequestTimeout = TimeSpan.FromSeconds(60)
             };
 
-            _client = new CosmosClient(config.Endpoint, config.PrimaryKey, options);
+            _client = new CosmosClient(config.Endpoint, primaryKey, options);
 
             OnStatusChanged?.Invoke("Creating or getting database...");
             _database = await _client.CreateDatabaseIfNotExistsAsync(config.DatabaseName);
@@ -69,21 +98,29 @@ public class CosmosDbService : IDisposable
             );
 
             OnStatusChanged?.Invoke("Connection established successfully!");
+            _auditLogger.LogAuthenticationAttempt(config.Endpoint, true);
             return true;
         }
         catch (ArgumentException ex)
         {
-            OnStatusChanged?.Invoke($"Validation Error: {ex.Message}");
+            _auditLogger.LogException("InitializeAsync", ex);
+            OnStatusChanged?.Invoke(SecureErrorHandler.GetUserFriendlyMessage(ex));
             return false;
         }
         catch (CosmosException ex)
         {
-            OnStatusChanged?.Invoke($"Cosmos DB Error: {ex.Message} (Status: {ex.StatusCode})");
+            _auditLogger.LogException("InitializeAsync", ex);
+            if (SecureErrorHandler.IsSecuritySensitive(ex))
+            {
+                _auditLogger.LogSecurityEvent("AuthenticationFailure", ex.Message, "Critical");
+            }
+            OnStatusChanged?.Invoke(SecureErrorHandler.GetUserFriendlyMessage(ex));
             return false;
         }
         catch (Exception ex)
         {
-            OnStatusChanged?.Invoke($"Error: {ex.Message}");
+            _auditLogger.LogException("InitializeAsync", ex);
+            OnStatusChanged?.Invoke(SecureErrorHandler.GetUserFriendlyMessage(ex));
             return false;
         }
     }
@@ -101,6 +138,14 @@ public class CosmosDbService : IDisposable
         Interlocked.Exchange(ref _totalDataSizeKB, 0);
         _startTime = DateTime.UtcNow;
 
+        // Security: Audit log ingestion start
+        _auditLogger.LogIngestionStart(
+            config.DataType.ToString(),
+            config.WorkloadType,
+            config.BatchSize,
+            config.DocumentSizeKB
+        );
+
         OnStatusChanged?.Invoke("Starting data ingestion...");
 
         try
@@ -110,6 +155,9 @@ public class CosmosDbService : IDisposable
 
             while (!cancellationToken.IsCancellationRequested && _isRunning)
             {
+                // Security: Check cancellation token before expensive operations
+                cancellationToken.ThrowIfCancellationRequested();
+                
                 var batch = GenerateBatch(config);
                 await IngestBatchAsync(batch, cancellationToken);
 
@@ -136,15 +184,30 @@ public class CosmosDbService : IDisposable
                 }
             }
 
+            // Security: Audit log ingestion stop
+            var duration = (DateTime.UtcNow - _startTime).TotalSeconds;
+            _auditLogger.LogIngestionStop(
+                Interlocked.Read(ref _documentCounter),
+                Interlocked.Read(ref _totalDataSizeKB),
+                duration
+            );
+
             OnStatusChanged?.Invoke("Ingestion stopped.");
         }
         catch (OperationCanceledException)
         {
+            var duration = (DateTime.UtcNow - _startTime).TotalSeconds;
+            _auditLogger.LogIngestionStop(
+                Interlocked.Read(ref _documentCounter),
+                Interlocked.Read(ref _totalDataSizeKB),
+                duration
+            );
             OnStatusChanged?.Invoke("Ingestion cancelled by user.");
         }
         catch (Exception ex)
         {
-            OnStatusChanged?.Invoke($"Error during ingestion: {ex.GetType().Name} - {ex.Message}");
+            _auditLogger.LogException("StartIngestionAsync", ex);
+            OnStatusChanged?.Invoke(SecureErrorHandler.GetUserFriendlyMessage(ex));
         }
         finally
         {
@@ -361,6 +424,7 @@ public class CosmosDbService : IDisposable
             _client = null;
             _container = null;
             _database = null;
+            _auditLogger?.Dispose();
         }
 
         _disposed = true;

@@ -1,6 +1,8 @@
 using CosmosDBIngester.Models;
 using CosmosDBIngester.Services;
+using CosmosDBIngester.Security;
 using System.Windows.Forms;
+using System.Configuration;
 
 namespace CosmosDBIngester;
 
@@ -10,8 +12,12 @@ public partial class MainForm : Form
     private CosmosConfig _config = new CosmosConfig();
     private CancellationTokenSource? _cancellationTokenSource;
     private System.Windows.Forms.Timer _statsTimer;
+    private System.Windows.Forms.Timer _idleTimer;  // Security: Auto-clear credentials
     private bool _isDarkMode = true;
     private const int StatsTimerIntervalMs = 100;
+    private const int IdleTimeoutMinutes = 30;  // Security: 30 minute idle timeout
+    private DateTime _lastActivityTime;
+    private readonly AuditLogger _auditLogger = new AuditLogger();
 
     private TextBox txtEndpoint = null!;
     private TextBox txtPrimaryKey = null!;
@@ -38,6 +44,25 @@ public partial class MainForm : Form
 
     public MainForm()
     {
+        // Security: Show disclaimer on first run
+        var disclaimerShown = Properties.Settings.Default.DisclaimerAccepted;
+        if (!disclaimerShown)
+        {
+            var disclaimer = new DisclaimerDialog();
+            if (disclaimer.ShowDialog() != DialogResult.OK)
+            {
+                // User declined - exit application
+                Environment.Exit(0);
+                return;
+            }
+            
+            if (disclaimer.DoNotShowAgain)
+            {
+                Properties.Settings.Default.DisclaimerAccepted = true;
+                Properties.Settings.Default.Save();
+            }
+        }
+        
         _cosmosService = new CosmosDbService();
         _cosmosService.OnStatusChanged += OnStatusChanged;
         _cosmosService.OnStatsUpdated += OnStatsUpdated;
@@ -46,7 +71,16 @@ public partial class MainForm : Form
         _statsTimer.Interval = StatsTimerIntervalMs;
         _statsTimer.Tick += (s, e) => { }; // Removed Application.DoEvents() anti-pattern
         
+        // Security: Idle timeout timer
+        _idleTimer = new System.Windows.Forms.Timer();
+        _idleTimer.Interval = 60000; // Check every minute
+        _idleTimer.Tick += IdleTimer_Tick;
+        _idleTimer.Start();
+        _lastActivityTime = DateTime.UtcNow;
+        
         InitializeComponent();
+        
+        _auditLogger.LogSecurityEvent("ApplicationStarted", $"Version: 1.0.0, User: {Environment.UserName}", "Info");
     }
 
     private void InitializeComponent()
@@ -223,6 +257,9 @@ public partial class MainForm : Form
     {
         try
         {
+            // Security: Update activity time
+            _lastActivityTime = DateTime.UtcNow;
+            
             if (string.IsNullOrWhiteSpace(txtEndpoint.Text) || 
                 string.IsNullOrWhiteSpace(txtPrimaryKey.Text) ||
                 string.IsNullOrWhiteSpace(txtDatabase.Text) ||
@@ -232,17 +269,44 @@ public partial class MainForm : Form
                 return;
             }
 
-            // Validate endpoint URL format
-            if (!Uri.TryCreate(txtEndpoint.Text.Trim(), UriKind.Absolute, out var uri) || 
-                (uri.Scheme != "https" && uri.Scheme != "http"))
+            // Security: Comprehensive input validation
+            var endpointResult = InputValidator.ValidateEndpoint(txtEndpoint.Text.Trim());
+            if (!endpointResult.IsValid)
             {
-                MessageBox.Show("Endpoint must be a valid HTTPS URL (e.g., https://your-account.documents.azure.com:443/)", 
-                    "Invalid Endpoint", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(endpointResult.ErrorMessage, "Invalid Endpoint", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            
+            var keyResult = InputValidator.ValidatePrimaryKey(txtPrimaryKey.Text.Trim());
+            if (!keyResult.IsValid)
+            {
+                MessageBox.Show(keyResult.ErrorMessage, "Invalid Primary Key", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            
+            var dbResult = InputValidator.ValidateDatabaseName(txtDatabase.Text.Trim());
+            if (!dbResult.IsValid)
+            {
+                MessageBox.Show(dbResult.ErrorMessage, "Invalid Database Name", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            
+            var collResult = InputValidator.ValidateCollectionName(txtCollection.Text.Trim());
+            if (!collResult.IsValid)
+            {
+                MessageBox.Show(collResult.ErrorMessage, "Invalid Collection Name", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            
+            var throughputResult = InputValidator.ValidateThroughput((int)numThroughput.Value);
+            if (!throughputResult.IsValid)
+            {
+                MessageBox.Show(throughputResult.ErrorMessage, "Invalid Throughput", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
             _config.Endpoint = txtEndpoint.Text.Trim();
-            _config.PrimaryKey = txtPrimaryKey.Text.Trim();
+            _config.SetPrimaryKey(txtPrimaryKey.Text.Trim());  // Security: Use SecureString
             _config.DatabaseName = txtDatabase.Text.Trim();
             _config.CollectionName = txtCollection.Text.Trim();
             _config.ThroughputRUs = (int)numThroughput.Value;
@@ -267,7 +331,8 @@ public partial class MainForm : Form
                 // Keep disconnect button enabled
                 btnDisconnect.Enabled = true;
                 
-                MessageBox.Show("Successfully connected to Cosmos DB!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("Successfully connected to Cosmos DB!\n\n⚠️ REMINDER: This tool generates TEST DATA ONLY.\nDo not use with production systems containing real data.", 
+                    "Connection Successful", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             else
             {
@@ -280,8 +345,10 @@ public partial class MainForm : Form
         {
             btnConnect.Enabled = true;
             btnConnect.Text = "Connect";
-            MessageBox.Show($"Connection error: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            OnStatusChanged($"Exception in Connect: {ex.GetType().Name} - {ex.Message}");
+            _auditLogger.LogException("BtnConnect_Click", ex);
+            var userMessage = SecureErrorHandler.GetUserFriendlyMessage(ex);
+            MessageBox.Show(userMessage, "Connection Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            OnStatusChanged($"Connection failed. Check logs for details.");
         }
     }
 
@@ -457,8 +524,66 @@ public partial class MainForm : Form
         _cancellationTokenSource?.Dispose();
         _statsTimer?.Stop();
         _statsTimer?.Dispose();
+        _idleTimer?.Stop();
+        _idleTimer?.Dispose();
         _cosmosService.Dispose();
+        
+        // Security: Clear credentials from memory
+        _config.ClearCredentials();
+        txtPrimaryKey.Text = string.Empty;
+        
+        // Security: Audit log application close
+        _auditLogger.LogSecurityEvent("ApplicationClosed", $"User: {Environment.UserName}", "Info");
+        _auditLogger.Dispose();
+        
         base.OnFormClosing(e);
+    }
+    
+    // Security: Idle timeout handler
+    private void IdleTimer_Tick(object? sender, EventArgs e)
+    {
+        var idleTime = DateTime.UtcNow - _lastActivityTime;
+        if (idleTime.TotalMinutes >= IdleTimeoutMinutes)
+        {
+            // Stop any running ingestion
+            if (_cosmosService.IsRunning)
+            {
+                _cosmosService.StopIngestion();
+                _cancellationTokenSource?.Cancel();
+                _statsTimer.Stop();
+            }
+            
+            // Clear credentials
+            _config.ClearCredentials();
+            txtPrimaryKey.Text = string.Empty;
+            
+            // Reset connection
+            BtnDisconnect_Click(null, EventArgs.Empty);
+            
+            _auditLogger.LogSecurityEvent("IdleTimeout", $"Session timed out after {IdleTimeoutMinutes} minutes of inactivity", "Warning");
+            
+            MessageBox.Show(
+                $"Your session has timed out due to {IdleTimeoutMinutes} minutes of inactivity.\n\nFor security reasons, your credentials have been cleared.\nPlease reconnect to continue.",
+                "Session Timeout",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning
+            );
+            
+            _lastActivityTime = DateTime.UtcNow; // Reset to prevent repeated alerts
+        }
+    }
+    
+    // Security: Update activity time on mouse/keyboard interaction
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        _lastActivityTime = DateTime.UtcNow;
+        base.OnMouseMove(e);
+    }
+    
+    protected override void OnKeyPress(KeyPressEventArgs e)
+    {
+        _lastActivityTime = DateTime.UtcNow;
+        base.OnKeyPress(e);
     }
 
     private void BtnToggleTheme_Click(object? sender, EventArgs e)
