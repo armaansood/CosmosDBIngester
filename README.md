@@ -1,105 +1,134 @@
-# CosmosDBIngester
+# Cosmos DB Bulk Data Ingester 🚀
 
-A GUI-based tool for bulk ingesting data into Azure Cosmos DB. This application allows you to test and benchmark your Cosmos DB account by ingesting large amounts of data with configurable parameters.
+A modern Windows Forms application for bulk ingesting realistic mock data into Azure Cosmos DB. Perfect for testing, demos, load testing, and development!
 
-## Features
+![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?logo=dotnet)
+![Platform](https://img.shields.io/badge/Platform-Windows-blue?logo=windows)
+![License](https://img.shields.io/badge/License-MIT-green)
 
-- **Easy Configuration**: Simple web interface to configure your Cosmos DB connection
-- **Flexible Ingestion**: Configure batch size, document size, and workload patterns
-- **Real-time Monitoring**: Live statistics showing documents ingested, data size, and throughput
-- **Visual Charts**: Real-time chart showing data growth over time
-- **Multiple Workload Types**:
-  - **Sequential**: Creates documents with unique partition keys (best for distributed workloads)
-  - **Random**: Uses random partition keys for each document
-  - **Hot Partition**: All documents use the same partition key (useful for testing hot partition scenarios)
+## ✨ Features
 
-## Prerequisites
+### 🎨 Modern UI
+- **Dark Mode & Light Mode** - Toggle between themes
+- **Resizable Window** - Maximize for better visibility
+- **Real-time Statistics Dashboard** - Live ingestion metrics
+- **Timestamped Status Log** - Track all operations
 
-- .NET 8.0 SDK or later
-- An Azure Cosmos DB account
+### 📊 Multiple Data Types
+Generate realistic mock data using **Bogus**:
+- 💰 **Financial** - Banking transactions, payments, accounts
+- 🛒 **E-Commerce** - Orders, products, customers, shipping
+- 🏥 **Healthcare** - Patient records, diagnoses, vitals, medications
+- 🤖 **IoT** - Device telemetry, sensors, location data
 
-## Getting Started
+### ⚡ Workload Patterns
+- **Sequential** - Even partition distribution (balanced load)
+- **Random** - Random partition assignment (varied access)
+- **HotPartition** - Single partition (partition saturation testing)
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/armaansood/CosmosDBIngester.git
-   cd CosmosDBIngester/CosmosDBIngester
-   ```
+### ⚙️ Flexible Configuration
+- Batch Size: 1-1,000 documents
+- Document Size: 1 KB - 2 MB (2,048 KB)
+- Throughput: 400 - 1,000,000 RUs
+- Change connections without restarting
 
-2. Build the application:
-   ```bash
-   dotnet build
-   ```
+## 🚀 Quick Start
 
-3. Run the application:
-   ```bash
-   dotnet run
-   ```
+### Download & Run (Windows)
 
-4. Open your browser to `https://localhost:5001` (or the URL shown in the console)
+1. **Download the latest release:**
+   - Go to [Releases](https://github.com/armaansood/CosmosDBIngester/releases)
+   - Download `CosmosDBIngester.zip`
+   - Extract and run `CosmosDBIngester.exe`
 
-## How to Use
+2. **Connect to Cosmos DB:**
+   - Enter your Cosmos DB endpoint and primary key
+   - Specify database and collection names
+   - Click **Connect**
 
-### Step 1: Configure Connection Settings
+3. **Start Ingesting:**
+   - Select data type and workload pattern
+   - Configure batch size and document size
+   - Click **Start Ingestion**
 
-1. **Cosmos DB Endpoint**: Enter your Cosmos DB endpoint URL (e.g., `https://your-account.documents.azure.com:443/`)
-2. **Primary Key**: Enter your Cosmos DB primary key
-3. **Database Name**: Enter the name of the database to use (will be created if it doesn't exist)
-4. **Collection/Container Name**: Enter the container name (will be created if it doesn't exist)
-5. **Throughput (RUs)**: Set the Request Units to provision if the container doesn't exist (minimum 400)
-6. Click **Connect** to establish the connection
+### Build from Source
 
-### Step 2: Configure Ingestion Settings
+```powershell
+# Clone the repository
+git clone https://github.com/armaansood/CosmosDBIngester.git
+cd CosmosDBIngester
+# Build the project
+dotnet build -c Release
 
-1. **Batch Size**: Number of documents to ingest per batch (1-1000)
-2. **Document Size**: Size of each document in KB (1-100 KB)
-3. **Workload Type**: Choose your workload pattern:
-   - **Sequential**: Best for distributed load testing
-   - **Random**: Simulates random data access patterns
-   - **Hot Partition**: Tests single partition performance
+# Run the application
+cd CosmosDBIngester\bin\Release\net8.0-windows
+.\CosmosDBIngester.exe
+```
 
-### Step 3: Start Ingestion
+## 📖 Documentation
 
-1. Click **Start Ingestion** to begin
-2. Monitor real-time statistics:
-   - Total documents ingested
-   - Total data size
-   - Documents per second
-   - Throughput (KB/s)
-3. View the live chart showing data growth over time
-4. Click **Stop Ingestion** when done
+For detailed usage instructions, see the [**User Guide**](USER_GUIDE.md).
 
-## Configuration
+## 📊 Screenshots
 
-The application uses bulk execution mode for optimal performance. Key settings:
-- Maximum retry attempts: 10
-- Retry wait time: 30 seconds
-- Statistics update interval: 1 second
+### Dark Mode
+Beautiful dark theme for comfortable extended use with real-time statistics and status logging.
 
-## Architecture
+### Light Mode
+Clean light theme with excellent readability and professional appearance.
 
-- **Frontend**: Blazor Server with interactive components
-- **Backend**: Azure Cosmos DB SDK v3 with bulk execution support
-- **Data Generation**: Configurable document generation with padding to match specified size
-- **Real-time Updates**: SignalR for live statistics updates
+## 💡 Use Cases
 
-## Document Structure
+- **Load Testing** - Generate high-volume data to test Cosmos DB performance
+- **Demo Data** - Populate databases with realistic sample data for demos
+- **Development** - Create test datasets for application development
+- **Benchmarking** - Test different partition strategies and configurations
+- **Training** - Learn Cosmos DB concepts with hands-on data generation
 
-Each ingested document contains:
-- `id`: Unique identifier (GUID)
-- `partitionKey`: Partition key (varies by workload type)
-- `timestamp`: UTC timestamp of creation
-- `workloadType`: The workload type used
-- `data`: Padding data to reach target document size
-- `sequenceNumber`: Sequential number for tracking
+## 🛠️ Technology Stack
 
-## Performance Tips
+- **Framework**: .NET 8.0 Windows Forms
+- **Database SDK**: Microsoft.Azure.Cosmos v3.43.1
+- **Data Generation**: Bogus v35.6.1
+- **Features**: Bulk execution, dark/light themes, resizable UI
 
-1. Start with small batch sizes (10-50) and increase gradually
-2. Monitor RU consumption in the Azure Portal
-3. Use Sequential workload for best overall throughput
-4. For hot partition testing, ensure sufficient RUs are provisioned
-5. Document size includes overhead (~200 bytes for metadata)
+## 📦 Building a Release
+
+Create a standalone executable:
+
+```powershell
+dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+```
+
+Output location: `CosmosDBIngester\bin\Release\net8.0-windows\win-x64\publish\`
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to:
+- Report bugs via [Issues](https://github.com/armaansood/CosmosDBIngester/issues)
+- Submit feature requests
+- Create pull requests
+
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## 🙏 Acknowledgments
+
+- Azure Cosmos DB team for the excellent SDK
+- Bogus library by Brian Chavez for realistic data generation
+- Community contributors and testers
+
+## 📞 Support
+
+- **Issues**: [GitHub Issues](https://github.com/armaansood/CosmosDBIngester/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/armaansood/CosmosDBIngester/discussions)
+
+---
+
+**Made with ❤️ for the Cosmos DB community**
+
+⭐ If you find this tool useful, please consider giving it a star!
 
 ## License
 

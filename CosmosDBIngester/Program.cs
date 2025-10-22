@@ -1,31 +1,14 @@
-using CosmosDBIngester.Components;
+using CosmosDBIngester.Models;
 using CosmosDBIngester.Services;
 
-var builder = WebApplication.CreateBuilder(args);
+namespace CosmosDBIngester;
 
-// Add services to the container.
-builder.Services.AddRazorComponents()
-    .AddInteractiveServerComponents();
-
-// Register Cosmos DB service as scoped (one per user session)
-builder.Services.AddScoped<CosmosDbService>();
-
-var app = builder.Build();
-
-// Configure the HTTP request pipeline.
-if (!app.Environment.IsDevelopment())
+class Program
 {
-    app.UseExceptionHandler("/Error", createScopeForErrors: true);
-    // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
-    app.UseHsts();
+    [STAThread]
+    static void Main(string[] args)
+    {
+        ApplicationConfiguration.Initialize();
+        Application.Run(new MainForm());
+    }
 }
-
-app.UseHttpsRedirection();
-
-app.UseStaticFiles();
-app.UseAntiforgery();
-
-app.MapRazorComponents<App>()
-    .AddInteractiveServerRenderMode();
-
-app.Run();

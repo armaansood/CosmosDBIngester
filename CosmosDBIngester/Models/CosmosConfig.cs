@@ -10,4 +10,5 @@ public class CosmosConfig
     public int BatchSize { get; set; } = 10;
     public int DocumentSizeKB { get; set; } = 1;
     public string WorkloadType { get; set; } = "Sequential";
+    public DataType DataType { get; set; } = DataType.Financial;
 }
