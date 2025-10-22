@@ -11,6 +11,7 @@ public partial class MainForm : Form
     private CancellationTokenSource? _cancellationTokenSource;
     private System.Windows.Forms.Timer _statsTimer;
     private bool _isDarkMode = true;
+    private const int StatsTimerIntervalMs = 100;
 
     private TextBox txtEndpoint = null!;
     private TextBox txtPrimaryKey = null!;
@@ -42,8 +43,8 @@ public partial class MainForm : Form
         _cosmosService.OnStatsUpdated += OnStatsUpdated;
         
         _statsTimer = new System.Windows.Forms.Timer();
-        _statsTimer.Interval = 100;
-        _statsTimer.Tick += (s, e) => Application.DoEvents();
+        _statsTimer.Interval = StatsTimerIntervalMs;
+        _statsTimer.Tick += (s, e) => { }; // Removed Application.DoEvents() anti-pattern
         
         InitializeComponent();
     }
@@ -220,48 +221,67 @@ public partial class MainForm : Form
 
     private async void BtnConnect_Click(object? sender, EventArgs e)
     {
-        if (string.IsNullOrWhiteSpace(txtEndpoint.Text) || 
-            string.IsNullOrWhiteSpace(txtPrimaryKey.Text) ||
-            string.IsNullOrWhiteSpace(txtDatabase.Text) ||
-            string.IsNullOrWhiteSpace(txtCollection.Text))
+        try
         {
-            MessageBox.Show("Please fill in all connection fields.", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
-        }
+            if (string.IsNullOrWhiteSpace(txtEndpoint.Text) || 
+                string.IsNullOrWhiteSpace(txtPrimaryKey.Text) ||
+                string.IsNullOrWhiteSpace(txtDatabase.Text) ||
+                string.IsNullOrWhiteSpace(txtCollection.Text))
+            {
+                MessageBox.Show("Please fill in all connection fields.", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
 
-        _config.Endpoint = txtEndpoint.Text;
-        _config.PrimaryKey = txtPrimaryKey.Text;
-        _config.DatabaseName = txtDatabase.Text;
-        _config.CollectionName = txtCollection.Text;
-        _config.ThroughputRUs = (int)numThroughput.Value;
+            // Validate endpoint URL format
+            if (!Uri.TryCreate(txtEndpoint.Text.Trim(), UriKind.Absolute, out var uri) || 
+                (uri.Scheme != "https" && uri.Scheme != "http"))
+            {
+                MessageBox.Show("Endpoint must be a valid HTTPS URL (e.g., https://your-account.documents.azure.com:443/)", 
+                    "Invalid Endpoint", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
 
-        btnConnect.Enabled = false;
-        btnConnect.Text = "Connecting...";
+            _config.Endpoint = txtEndpoint.Text.Trim();
+            _config.PrimaryKey = txtPrimaryKey.Text.Trim();
+            _config.DatabaseName = txtDatabase.Text.Trim();
+            _config.CollectionName = txtCollection.Text.Trim();
+            _config.ThroughputRUs = (int)numThroughput.Value;
 
-        var success = await _cosmosService.InitializeAsync(_config);
-
-        if (success)
-        {
-            btnStart.Enabled = true;
             btnConnect.Enabled = false;
-            
-            // Disable individual connection input controls
-            txtEndpoint.Enabled = false;
-            txtPrimaryKey.Enabled = false;
-            txtDatabase.Enabled = false;
-            txtCollection.Enabled = false;
-            numThroughput.Enabled = false;
-            
-            // Keep disconnect button enabled
-            btnDisconnect.Enabled = true;
-            
-            MessageBox.Show("Successfully connected to Cosmos DB!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            btnConnect.Text = "Connecting...";
+
+            var success = await _cosmosService.InitializeAsync(_config);
+
+            if (success)
+            {
+                btnStart.Enabled = true;
+                btnConnect.Enabled = false;
+                
+                // Disable individual connection input controls
+                txtEndpoint.Enabled = false;
+                txtPrimaryKey.Enabled = false;
+                txtDatabase.Enabled = false;
+                txtCollection.Enabled = false;
+                numThroughput.Enabled = false;
+                
+                // Keep disconnect button enabled
+                btnDisconnect.Enabled = true;
+                
+                MessageBox.Show("Successfully connected to Cosmos DB!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            else
+            {
+                btnConnect.Enabled = true;
+                btnConnect.Text = "Connect";
+                MessageBox.Show("Failed to connect. Please check the status log for details.", "Connection Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
-        else
+        catch (Exception ex)
         {
             btnConnect.Enabled = true;
             btnConnect.Text = "Connect";
-            MessageBox.Show("Failed to connect. Please check your settings.", "Connection Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show($"Connection error: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            OnStatusChanged($"Exception in Connect: {ex.GetType().Name} - {ex.Message}");
         }
     }
 
@@ -282,6 +302,8 @@ public partial class MainForm : Form
             // Stop ingestion
             _cosmosService.StopIngestion();
             _cancellationTokenSource?.Cancel();
+            _cancellationTokenSource?.Dispose();
+            _cancellationTokenSource = null;
             _statsTimer.Stop();
             btnStart.Enabled = false;
             btnStop.Enabled = false;
@@ -303,7 +325,6 @@ public partial class MainForm : Form
         numThroughput.Enabled = true;
         btnConnect.Enabled = true;
         btnConnect.Text = "Connect";
-        btnDisconnect.Enabled = false;
         btnDisconnect.Enabled = false;
         btnStart.Enabled = false;
         
@@ -332,6 +353,10 @@ public partial class MainForm : Form
         _config.BatchSize = (int)numBatchSize.Value;
         _config.DocumentSizeKB = (int)numDocumentSize.Value;
 
+        // Dispose previous cancellation token if exists
+        _cancellationTokenSource?.Dispose();
+        _cancellationTokenSource = new CancellationTokenSource();
+
         // Disable input controls only
         cmbDataType.Enabled = false;
         cmbWorkloadType.Enabled = false;
@@ -339,16 +364,9 @@ public partial class MainForm : Form
         numDocumentSize.Enabled = false;
         btnStart.Enabled = false;
         
-        // IMPORTANT: Enable Stop button AFTER disabling inputs
+        // Enable Stop button
         btnStop.Enabled = true;
         
-        OnStatusChanged($"Stop button enabled: {btnStop.Enabled}");
-        
-        // Force UI refresh
-        btnStop.Refresh();
-        Application.DoEvents();
-
-        _cancellationTokenSource = new CancellationTokenSource();
         _statsTimer.Start();
 
         OnStatusChanged($"Starting ingestion with DataType: {_config.DataType}");
@@ -360,11 +378,16 @@ public partial class MainForm : Form
             {
                 await _cosmosService.StartIngestionAsync(_config, _cancellationTokenSource.Token);
             }
+            catch (OperationCanceledException)
+            {
+                this.Invoke(() => OnStatusChanged("Ingestion cancelled."));
+            }
             catch (Exception ex)
             {
                 this.Invoke(() =>
                 {
-                    OnStatusChanged($"Error: {ex.Message}");
+                    OnStatusChanged($"Error: {ex.GetType().Name} - {ex.Message}");
+                    MessageBox.Show($"Ingestion error: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 });
             }
             finally
@@ -398,10 +421,6 @@ public partial class MainForm : Form
         cmbWorkloadType.Enabled = true;
         numBatchSize.Enabled = true;
         numDocumentSize.Enabled = true;
-        
-        // Force UI refresh
-        btnStart.Refresh();
-        btnStop.Refresh();
     }
 
     private void OnStatusChanged(string status)
@@ -435,6 +454,9 @@ public partial class MainForm : Form
     {
         _cosmosService.StopIngestion();
         _cancellationTokenSource?.Cancel();
+        _cancellationTokenSource?.Dispose();
+        _statsTimer?.Stop();
+        _statsTimer?.Dispose();
         _cosmosService.Dispose();
         base.OnFormClosing(e);
     }
