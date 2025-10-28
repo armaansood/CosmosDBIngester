@@ -6,6 +6,26 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWindowsForms>true</UseWindowsForms>
+    
+    <!-- Application Manifest for Windows Security -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    
+    <!-- Assembly Information -->
+    <AssemblyName>CosmosDBIngester</AssemblyName>
+    <Product>Cosmos DB Bulk Data Ingester</Product>
+    <Company>Open Source</Company>
+    <Copyright>Copyright © 2025</Copyright>
+    <AssemblyVersion>2.0.0.0</AssemblyVersion>
+    <FileVersion>2.0.0.0</FileVersion>
+    <Version>2.0.0</Version>
+    <Description>Enterprise-grade bulk data ingestion tool for Azure Cosmos DB with comprehensive security features</Description>
+    
+    <!-- Security: Deterministic builds for reproducibility -->
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild>false</ContinuousIntegrationBuild>
+    
+    <!-- Generate documentation XML -->
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
 
   <ItemGroup>

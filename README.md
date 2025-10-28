@@ -41,7 +41,27 @@ Generate realistic mock data using **Bogus**:
    - Download `CosmosDBIngester.zip`
    - Extract and run `CosmosDBIngester.exe`
 
-2. **Connect to Cosmos DB:**
+2. **⚠️ Windows Security Warning:**
+   
+   When you first run the application, Windows SmartScreen may show:
+   > "Windows protected your PC - Unknown publisher"
+   
+   **This is normal for unsigned applications.** To run:
+   - Click **"More info"**
+   - Click **"Run anyway"**
+   
+   **Or unblock the file:**
+   ```powershell
+   # Right-click → Properties → Check "Unblock" → Apply
+   # Or use PowerShell:
+   Unblock-File -Path ".\CosmosDBIngester.exe"
+   ```
+   
+   **Why this happens:** The application is not digitally signed with a code signing certificate (~$200-500/year). See [CODE_SIGNING_GUIDE.md](CODE_SIGNING_GUIDE.md) for details.
+   
+   **Is it safe?** Yes! This is open-source software. You can review all code in this repository. The warning only means "we don't know the publisher" not "this is dangerous."
+
+3. **Connect to Cosmos DB:**
    - Enter your Cosmos DB endpoint and primary key
    - Specify database and collection names
    - Click **Connect**
